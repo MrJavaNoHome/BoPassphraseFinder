@@ -4,6 +4,8 @@ import org.jsoup.nodes.Element;
 
 import java.awt.*;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -12,10 +14,9 @@ import java.util.stream.Collectors;
 public class BoPassphraseFinder {
     private static final String MAIN_PAGE_URL = "http://www.bialystokonline.pl";
     private static final String PARTIES_URL = MAIN_PAGE_URL.concat("/imprezy");
-    private static final String CLUB_PARTIES_URL = MAIN_PAGE_URL.concat("/imprezy-klubowe-taneczne-granie-do-piwa,imprezy,1,1.html");
     private static final String CONTESTS_URL = MAIN_PAGE_URL.concat("/konkursy.php");
-    private static final String PASSPHRASE_PREFIX = "KONKURSOWE HASŁO DNIA: ";
-
+    private static final String PASSPHRASE_PREFIX = "HASŁO DNIA: ";
+    private static final String DATE_PATTERN = "yyyy-MM-dd";
     private static final String PRIZES_PREFIX = "Nagrody";
     private static final String PASSWORD_PREFIX = "Hasło";
 
@@ -32,18 +33,19 @@ public class BoPassphraseFinder {
                 for (Integer chosenNumber : chosenNumbers) {
                     chosenContests.add(openContestUrls.get(chosenNumber - 1));
                 }
-                String passphraseElement = null;
-                for (String partyUrl : getClubPartyUrls()) {
-                    System.out.println("Checking url " + partyUrl);
-                    if (getPassphraseElement(partyUrl).isPresent()) {
-                        passphraseElement = getPassphraseElement(partyUrl).get().text().substring(PASSPHRASE_PREFIX.length());
-                        System.out.println(PASSPHRASE_PREFIX + passphraseElement);
+                String passphrase = null;
+                for (String url : getTodayPartyUrls()) {
+                    System.out.println("Checking url " + url);
+                    if (findPassphraseElement(url).isPresent()) {
+                        String passphraseElement = findPassphraseElement(url).get().text();
+                        passphrase = passphraseElement.substring(passphraseElement.indexOf(PASSWORD_PREFIX)).substring(PASSPHRASE_PREFIX.length());
+                        System.out.println(PASSPHRASE_PREFIX + passphrase);
                         break;
                     }
                 }
-                if (Objects.nonNull(passphraseElement)) {
+                if (Objects.nonNull(passphrase)) {
                     for (String url : chosenContests) {
-                        sendPasswordForContest(url, passphraseElement);
+                        sendPasswordForContest(url, passphrase);
                         TimeUnit.SECONDS.sleep(2);
                     }
                 }
@@ -96,18 +98,46 @@ public class BoPassphraseFinder {
     }
 
 
-    private static Optional<Element> getPassphraseElement(String partyUrl) throws IOException {
-        Document document = Jsoup.connect(partyUrl).get();
-        return document.select("i").stream().filter(i -> i.text().toUpperCase().startsWith(PASSPHRASE_PREFIX)).findFirst();
+    private static List<String> getTodayPartyUrls() throws IOException {
+        Document doc = Jsoup.connect(PARTIES_URL).get();
+        List<String> partyCategoryUrls = doc.select("div.spis_imprez > a").stream().map(atr -> PARTIES_URL.concat(atr.attr("href"))).collect(Collectors.toList());
+        List<String> partyUrls = new ArrayList<>();
+        for (String partyCategoryUrl : partyCategoryUrls) {
+            doc = Jsoup.connect(partyCategoryUrl).get();
+            List<Element> partyElements = doc.select("div.item");
+            for (Element partyElement : partyElements) {
+                boolean todayParty = false;
+                String dateS = partyElement.select("div.date").text();
+                LocalDate now = LocalDate.now();
+                //daty imprezy w formacie 2020-05-02
+                if(dateS.length()==DATE_PATTERN.length()) {
+                    LocalDate partyDate =  LocalDate.parse(dateS, DateTimeFormatter.ofPattern(DATE_PATTERN));
+                    if (partyDate.isEqual(now)) {
+                        todayParty = true;
+                    }
+                } else {  //daty imprezy w formacie 2020-05-02 - 2020-05-03
+                    LocalDate dateFrom =  LocalDate.parse(dateS.substring(0, DATE_PATTERN.length()), DateTimeFormatter.ofPattern(DATE_PATTERN));
+                    LocalDate dateTo =  LocalDate.parse(dateS.substring(dateS.length()-DATE_PATTERN.length()), DateTimeFormatter.ofPattern(DATE_PATTERN));
+                    if((dateFrom.isEqual(now) || dateFrom.isBefore(now)) && (dateTo.isEqual(now) || dateTo.isAfter(now))) {
+                        todayParty = true;
+                    }
+                }
+                if(todayParty) {
+                    partyUrls.add(PARTIES_URL.concat(partyElement.select("div.item > div.name > a, div.item2 > div.name > a").attr("href")));
+                }
+            }
+        }
+        System.out.println(String.format("Found %d urls to check", partyUrls.size()));
+        return partyUrls;
     }
 
-    private static List<String> getClubPartyUrls() throws IOException {
-        Document doc = Jsoup.connect(CLUB_PARTIES_URL).get();
-        List<String> urls =
-                doc.select("div.item > div.name > a, div.item2 > div.name > a").stream().map(atr -> PARTIES_URL.concat(atr.attr("href"))).collect(Collectors.toList());
-        System.out.println(String.format("Found %d urls to check", urls.size()));
-        return urls;
+
+    private static Optional<Element> findPassphraseElement(String partyUrl) throws IOException {
+        Document document = Jsoup.connect(partyUrl).get();
+        return  document.select("div.opis_imprezy").stream().filter(a->a.text().toUpperCase().contains(PASSPHRASE_PREFIX)).findFirst();
     }
+
+
 
     private static void sendPasswordForContest(String url, String passphraseElement) throws IOException {
         Document doc = Jsoup.connect(url).get();
@@ -140,3 +170,4 @@ public class BoPassphraseFinder {
 
 
 }
+
