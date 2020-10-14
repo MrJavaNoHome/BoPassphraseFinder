@@ -104,7 +104,7 @@ public class BoPassphraseFinder {
         List<String> partyUrls = new ArrayList<>();
         for (String partyCategoryUrl : partyCategoryUrls) {
             doc = Jsoup.connect(partyCategoryUrl).get();
-            List<Element> partyElements = doc.select("div.item");
+            List<Element> partyElements = doc.select("div.item, div.item2");
             for (Element partyElement : partyElements) {
                 boolean todayParty = false;
                 String dateS = partyElement.select("div.date").text();
